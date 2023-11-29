@@ -20,13 +20,16 @@ format: html
 #| echo: false
 #| message: false
 #| warning: false
+knitr::opts_chunk$set(suppress_messages = TRUE)
 
 rm(list=ls())
 
 library(tidyverse)
 library(sf)
 library(leaflet)
+library(leaflet.extras)
 library(htmltools)
+library(htmlwidgets)
 ```
 
 
@@ -34,102 +37,18 @@ library(htmltools)
 #| echo: false
 #| message: false
 #| warning: false
-
+# load file with information on partners to map
 partners <- read_csv("IL Snap Retailers.csv")
 partners <- st_as_sf(partners,
                      coords = c("Longitude", "Latitude"),
                      crs = "+proj=longlat +datum=WGS84 +no_defs")
+
+# load Illinois boundary shapefile downloaded from:
+# https://clearinghouse.isgs.illinois.edu/data/reference/illinois-state-boundary 
+illinois_polygon <- suppressMessages(st_read("IL_BNDY_State/IL_BNDY_State_Py.shp"))
 ```
 
-
-
-
-```{r second leaflet map test}
-#| echo: false
-#| message: false
-#| warning: false
-#| eval: false
-# determine colors for markers on map based on type
-partners <-  partners %>% 
-  mutate(marker_color = case_when(Type == "Farmers Market" ~ "green",
-                                Type == "CSA" ~ "blue",
-                                Type == "Store" ~ "darkred",
-                                Type == "Pop-Up Market" ~ "orange",
-                                TRUE ~ "purple"),
-         icon = case_when(Type == "Farmers Market" ~ "leaf",
-                          Type == "CSA" ~ "home",
-                          Type == "Store" ~ "storefront",
-                          Type == "Pop-Up Market" ~ "car",
-                          TRUE ~ "water"))
-
-# not able to get different icons to work, so will give everyone a leaf for now
-
-my_map <- leaflet() %>%
-  addTiles()
-
-# Add markers and popups for each row in the dataframe
-for (i in 1:nrow(partners)) {
-  name <- partners$Name[i]
-  website <- partners$Link[i]
-  address_1 <- partners$Address[i]
-  address_2 <-partners$Address_Line__2[i] 
-  city <- partners$City[i]
-  state <- partners$State[i]
-  zip <- partners$Zip5[i]
-  longitude <- partners$X[i]
-  latitude <- partners$Y[i]
-  hours <- partners$Hours[i]
-  days_of_week <- partners$`Day(s) of the Week`[i]
-  dates <- partners$Dates[i]
-  type <- partners$Type[i]
-  marker_color <- partners$marker_color[i]
-  icon <- partners$icon[i]
-
-  # Create the popup content
-  content <- paste(sep = "<br/>",
-    paste0("<b><a href='", website, "'>", name, "</a></b>"),
-    if_else(is.na(address_2), 
-            address_1, 
-            paste0(address_1, "<br/>", address_2)),
-    paste0(city, ", ", state, "  ", zip),
-    paste0("<br/>", "Type: ", type, "<br/>"),
-    paste0("Dates: ", dates),
-    paste0("Days: ", days_of_week),
-    paste0("Hours: ", hours)
-    )
-  
-  # create icon
-  icon_i <- awesomeIcons(
-    icon = "leaf",
-    iconColor = "black",
-    library = "ion",
-    markerColor = marker_color
-)
-  
-  # addAwesomeMarkers(~long, ~lat, icon=icons, label=~as.character(mag))  
-  my_map <- my_map %>%
-    addAwesomeMarkers(
-      lng = longitude,
-      lat = latitude,
-      icon = icon_i,
-      popup = content
-    )}
-
-my_map <- my_map %>%
-  addLayersControl(
-    overlayGroups = unique(partners$Type),
-    options = layersControlOptions(collapsed = FALSE)
-  )
-
-# Display the map
-my_map
-
-
-
-```
-
-
-```{r second leaflet map - manually added layers}
+```{r add map pop-up info to data}
 #| echo: false
 #| message: false
 #| warning: false
@@ -161,8 +80,131 @@ partners$pop_up_content <- paste(sep = "<br/>",
       paste0("Hours: ", partners$Hours)
       )
 
+```
+
+```{r create shapes for use in map}
+#| echo: false
+#| message: false
+#| warning: false
+
+# Create bounding box for the map to be able to set the most zoomed out view to the whole state, not further
+# adapted from this suggestion: https://stackoverflow.com/questions/51392181/setting-boundaries-of-leaflet-with-sf-geometry-in-r 
+IL_bbox <- st_bbox(illinois_polygon) %>% 
+  as.vector()
+# the above code returns the longitude and latitude coordinates needed to create a box around Illinois
+
+# save coordinates of bounding box (with first corner repeated at end) as a matrix to use for polygon creation
+IL_bbox_coords <- matrix(c(IL_bbox[1], IL_bbox[2],
+                            IL_bbox[1], IL_bbox[4],
+                            IL_bbox[3], IL_bbox[4],
+                            IL_bbox[3], IL_bbox[2],
+                            IL_bbox[1], IL_bbox[2]), ncol = 2, byrow = TRUE)
+# using the matrix saved above, create the polygon shape of the bounding box around Illinois
+IL_bbox_polygon <- st_polygon(list(IL_bbox_coords))
+
+# create a polygon that is everything except that bounding box (everywhere outside of it)
+# first create a polygon that is larger than Illinois
+buffer_polygon <- st_buffer(IL_bbox_polygon, dist = 10)
+# convert outside_polygon to same CRS as illinois shapefile (see below)
+buffer_polygon # need to convert this to an sf object so that we can add a CRS
+buffer_polygon <- st_sf(geometry = st_sfc(buffer_polygon))
+st_crs(buffer_polygon) <- st_crs(illinois_polygon)
+
+# now cut out Illinois shape from the buffer polygon
+outside_IL <- st_difference(buffer_polygon, illinois_polygon)
+```
+
+
+```{r create leaflet map}
+#| echo: false
+#| message: false
+#| warning: false
+
+# Create function that adds markers to the map for each category of partner (e.g. farmers market, store, etc.)
+addMarkersByType <- function(map, partners, type) {
+  filtered_partners <- partners %>% filter(Type == type)
+  
+  map <- map %>%
+    addAwesomeMarkers(
+      lng = filtered_partners$X,
+      lat = filtered_partners$Y,
+      icon = awesomeIcons(
+        icon = "leaf",
+        iconColor = "black",
+        library = "ion",
+        markerColor = filtered_partners$marker_color
+      ),
+      popup = filtered_partners$pop_up_content,
+      group = type
+    )
+  
+  return(map)
+}
+
+
+# Create base of the Leaflet map
+my_map <- leaflet(options = leafletOptions(minZoom = 6)) %>%
+  addTiles() %>%
+  addPolygons(data = outside_IL, opacity = 0, fillColor = "gray", fillOpacity = 0.75) %>%
+  addPolygons(data = illinois_polygon, color = "gray", weight = 1, opacity = 1, fillOpacity = 0) %>%
+  fitBounds(IL_bbox[1], IL_bbox[2], IL_bbox[3], IL_bbox[4]) %>%
+  setMaxBounds(IL_bbox[1], IL_bbox[2], IL_bbox[3], IL_bbox[4])
+  
+
+# Generate a list of the unique partner types
+partner_types <- unique(partners$Type)
+
+# Using function defined above inside a for-loop, add layers of markers to the map
+for (type in partner_types) {
+  my_map <- addMarkersByType(my_map, partners, type)
+}
+
+# Add layer control to allow for turning on/off of different partner type markers on the map
+my_map <- my_map %>%
+  addLayersControl(
+    overlayGroups = partner_types,
+    position = "topright",
+    options = layersControlOptions(collapsed = FALSE)
+  )
+
+
+# Add a search by address / zip code function and button to reset map to whole state view
+# and button that locates user's location on map
+my_map <- my_map %>% 
+  addResetMapButton() %>%
+  addEasyButton(easyButton(
+    icon="fa-crosshairs", title="Locate Me",
+    onClick=JS("function(btn, map){ map.locate({setView: true}); }"))) %>%
+  addSearchOSM()
+
+my_map <- my_map %>% addMiniMap(zoomLevelFixed = 4,
+                                toggleDisplay = TRUE,
+                                minimized = TRUE)
+
+# View the map!
+my_map
+
+# stop rendering (so maps in below chunks won't get included in the html file)
+knitr::knit_exit()
+```
+
+
+
+
+
+
+
+###### OLD / SCRATCH CODE
+This first chunk is the map that I used and converted to a functionized form:
+
+```{r leaflet map - manually added layers}
+#| echo: false
+#| message: false
+#| warning: false
+
 # not able to get different icons to work, so will give everyone a leaf for now
 
+# create subsets of parnters by type (to use for different layers)
 partners_farmers_markets <- partners %>% filter(Type == "Farmers Market")
 partners_stores <- partners %>% filter(Type == "Store")
 partners_csas <- partners %>% filter(Type == "CSA")
@@ -238,16 +280,7 @@ my_map <- leaflet() %>%
   
 
 my_map
-
-knitr::knit_exit()
-
 ```
-
-
-
-
-
-
 
 
 ```{r leaflet map with layers test 2}
@@ -337,15 +370,6 @@ my_map <- my_map %>%
 ```
 
 
-
-
-
-
-
-
-
-
-
 ```{r leaflet map with layers test 1}
 #| echo: false
 #| message: false
@@ -429,10 +453,6 @@ my_map
 ```
 
 
-
-
-
-
 ```{r leaflet alternative}
 #| echo: false
 #| message: false
@@ -469,3 +489,87 @@ my_map
 
 ```
 
+
+```{r second leaflet map test}
+#| echo: false
+#| message: false
+#| warning: false
+#| eval: false
+# determine colors for markers on map based on type
+partners <-  partners %>% 
+  mutate(marker_color = case_when(Type == "Farmers Market" ~ "green",
+                                Type == "CSA" ~ "blue",
+                                Type == "Store" ~ "darkred",
+                                Type == "Pop-Up Market" ~ "orange",
+                                TRUE ~ "purple"),
+         icon = case_when(Type == "Farmers Market" ~ "leaf",
+                          Type == "CSA" ~ "home",
+                          Type == "Store" ~ "storefront",
+                          Type == "Pop-Up Market" ~ "car",
+                          TRUE ~ "water"))
+
+# not able to get different icons to work, so will give everyone a leaf for now
+
+my_map <- leaflet() %>%
+  addTiles()
+
+# Add markers and popups for each row in the dataframe
+for (i in 1:nrow(partners)) {
+  name <- partners$Name[i]
+  website <- partners$Link[i]
+  address_1 <- partners$Address[i]
+  address_2 <-partners$Address_Line__2[i] 
+  city <- partners$City[i]
+  state <- partners$State[i]
+  zip <- partners$Zip5[i]
+  longitude <- partners$X[i]
+  latitude <- partners$Y[i]
+  hours <- partners$Hours[i]
+  days_of_week <- partners$`Day(s) of the Week`[i]
+  dates <- partners$Dates[i]
+  type <- partners$Type[i]
+  marker_color <- partners$marker_color[i]
+  icon <- partners$icon[i]
+
+  # Create the popup content
+  content <- paste(sep = "<br/>",
+    paste0("<b><a href='", website, "'>", name, "</a></b>"),
+    if_else(is.na(address_2), 
+            address_1, 
+            paste0(address_1, "<br/>", address_2)),
+    paste0(city, ", ", state, "  ", zip),
+    paste0("<br/>", "Type: ", type, "<br/>"),
+    paste0("Dates: ", dates),
+    paste0("Days: ", days_of_week),
+    paste0("Hours: ", hours)
+    )
+  
+  # create icon
+  icon_i <- awesomeIcons(
+    icon = "leaf",
+    iconColor = "black",
+    library = "ion",
+    markerColor = marker_color
+)
+  
+  # addAwesomeMarkers(~long, ~lat, icon=icons, label=~as.character(mag))  
+  my_map <- my_map %>%
+    addAwesomeMarkers(
+      lng = longitude,
+      lat = latitude,
+      icon = icon_i,
+      popup = content
+    )}
+
+my_map <- my_map %>%
+  addLayersControl(
+    overlayGroups = unique(partners$Type),
+    options = layersControlOptions(collapsed = FALSE)
+  )
+
+# Display the map
+my_map
+
+
+
+```
