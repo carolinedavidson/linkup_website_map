@@ -82,51 +82,41 @@ partners <- partners %>%
                                   "+", City, "+IL", sep = ""))
 
 # create format of content for pop up markers on each location
-partners$pop_up_content <- paste(sep = "<br/>",
+partners$pop_up_content <- paste(sep = "",
       # partner name                            
-      paste0("<b>", partners$Name, "</b>"),
+      paste0("<b>", partners$Name, "</b>", "<br/>"),
       # partner address
       if_else(is.na(partners$Address_Line__2), 
-              partners$Address, 
-              paste0(partners$Address, "<br/>", partners$Address_Line__2)),
+              paste0(partners$Address, "<br/>"),
+              paste0(partners$Address, "<br/>", partners$Address_Line__2, "<br/>")),
       if_else(is.na(partners$City),
-              "", # NEED TO SKIP LINE
-              paste0(partners$City, ", ", partners$State, "  ", partners$Zip5)),
+              "", 
+              paste0(partners$City, ", ", partners$State, "  ", partners$Zip5, "<br/>")),
       # link to googlemaps directions to partner address from user's current location
       if_else(is.na(partners$City),
-                    "", # NEED TO SKIP LINE
-                    paste0("<b><a href='", partners$google_maps_link, "' target='_blank'>Get Directions</a></b>")),
+                    "", 
+                    paste0("<b><a href='", partners$google_maps_link, "' target='_blank'>Get Directions</a></b>", "<br/>")),
       # list type of partner 
-      paste0("<br/>", "Type: ", partners$Type, "<br/>"),
+      paste0("<br/>", "Type: ", partners$Type, "<br/>", "<br/>"),
       # info about dates/days/hours of operation (if any)
       if_else(is.na(partners$Dates),
-             "", # NEED TO SKIP LINE
-             paste0("Dates: ", partners$Dates)),
+             "", 
+             paste0("Dates: ", partners$Dates, "<br/>")),
       if_else(is.na(partners$'Day(s) of the Week'),
-              "", # NEED TO SKIP LINE
-              paste0("Days: ", partners$'Day(s) of the Week')),
+              "",
+              paste0("Days: ", partners$'Day(s) of the Week', "<br/>")),
       if_else(is.na(partners$Hours),
-              "", # NEED TO SKIP LINE
-              paste0("Hours: ", partners$Hours)),
+              "",
+              paste0("Hours: ", partners$Hours, "<br/>")),
       # hyperlink to partner's website if we have one for them
       if_else(is.na(partners$Link),
-              "", # NEED TO SKIP LINE
-              paste0("<b><a href='", partners$Link, "' target='_blank'>Website</a></b>")),
+              "", 
+              paste0("<b><a href='", partners$Link, "' target='_blank'>Website</a></b>", "<br/>")),
       # add any additional notes at the bottom
       if_else(is.na(partners$Notes),
-              "", # NEED TO SKIP LINE
+              "", 
               paste0("<br/>", partners$Notes))
       )
-
-
-# for (i in 1:nrow(partners)) {
-#   partners$pop_up_content[i] <- paste(partners$pop_up_content_raw[i], collapse = "skip")
-# }
-
-# for (i in 1:nrow(partners)) {
-#   collapsed_content <- paste(partners$pop_up_content_raw[i], collapse = "skip")
-#   partners$pop_up_content[i] <- collapsed_content
-# }
 
 ```
 
@@ -190,7 +180,9 @@ addMarkersByType <- function(map, partners, type) {
         markerColor = filtered_partners$marker_color
       ),
       popup = filtered_partners$pop_up_content,
-      group = type
+      group = type,
+      clusterOptions = markerClusterOptions(),
+      clusterId = "all_markers" 
     )
   
   return(map)
