@@ -41,7 +41,9 @@ library(htmlwidgets)
 #| warning: false
 #| 
 # load file with information on partners to map
-partners <- read_csv("IL Snap Retailers.csv")
+# toy dataframe: partners <- read_csv("IL Snap Retailers.csv")
+partners <- read_csv("Winter Markets.csv") # winter markets only (based on website)
+
 partners <- st_as_sf(partners,
                      coords = c("Longitude", "Latitude"),
                      crs = "+proj=longlat +datum=WGS84 +no_defs")
@@ -51,7 +53,7 @@ partners <- st_as_sf(partners,
 illinois_polygon <- st_read("IL_BNDY_State/IL_BNDY_State_Py.shp", quiet = TRUE)
 ```
 
-```{r add map pop-up info to data}
+```{r add map pop-up info to data - winter markets}
 #| echo: false
 #| message: false
 #| warning: false
@@ -61,9 +63,9 @@ partners <-  partners %>%
   mutate(Type = case_when(is.na(Type) ~ "Other",
                           TRUE ~ Type),
           marker_color = case_when(Type == "Farmers Market" ~ "green",
-                                Type == "CSA" ~ "blue",
+                                Type == "CSA / Delivery" ~ "blue",
                                 Type == "Store" ~ "darkred",
-                                Type == "Pop-Up Market" ~ "orange",
+                                Type == "Mobile Market" ~ "orange",
                                 TRUE ~ "purple"),
          icon = case_when(Type == "Farmers Market" ~ "leaf",
                           Type == "CSA" ~ "home",
@@ -87,22 +89,48 @@ partners$pop_up_content <- paste(sep = "<br/>",
       if_else(is.na(partners$Address_Line__2), 
               partners$Address, 
               paste0(partners$Address, "<br/>", partners$Address_Line__2)),
-      paste0(partners$City, ", ", partners$State, "  ", partners$Zip5),
+      if_else(is.na(partners$City),
+              "", # NEED TO SKIP LINE
+              paste0(partners$City, ", ", partners$State, "  ", partners$Zip5)),
       # link to googlemaps directions to partner address from user's current location
-      paste0("<b><a href='", partners$google_maps_link, "'>", "Get Directions", "</a></b>"),
+      if_else(is.na(partners$City),
+                    "", # NEED TO SKIP LINE
+                    paste0("<b><a href='", partners$google_maps_link, "' target='_blank'>Get Directions</a></b>")),
       # list type of partner 
       paste0("<br/>", "Type: ", partners$Type, "<br/>"),
-      # info about dates/days/hours of operation
-      paste0("Dates: ", partners$Dates),
-      paste0("Days: ", partners$'Day(s) of the Week'),
-      paste0("Hours: ", partners$Hours),
+      # info about dates/days/hours of operation (if any)
+      if_else(is.na(partners$Dates),
+             "", # NEED TO SKIP LINE
+             paste0("Dates: ", partners$Dates)),
+      if_else(is.na(partners$'Day(s) of the Week'),
+              "", # NEED TO SKIP LINE
+              paste0("Days: ", partners$'Day(s) of the Week')),
+      if_else(is.na(partners$Hours),
+              "", # NEED TO SKIP LINE
+              paste0("Hours: ", partners$Hours)),
       # hyperlink to partner's website if we have one for them
       if_else(is.na(partners$Link),
-              "",
-              paste0("<b><a href='", partners$Link, "'>", "Website", "</a></b>"))
+              "", # NEED TO SKIP LINE
+              paste0("<b><a href='", partners$Link, "' target='_blank'>Website</a></b>")),
+      # add any additional notes at the bottom
+      if_else(is.na(partners$Notes),
+              "", # NEED TO SKIP LINE
+              paste0("<br/>", partners$Notes))
       )
 
+
+# for (i in 1:nrow(partners)) {
+#   partners$pop_up_content[i] <- paste(partners$pop_up_content_raw[i], collapse = "skip")
+# }
+
+# for (i in 1:nrow(partners)) {
+#   collapsed_content <- paste(partners$pop_up_content_raw[i], collapse = "skip")
+#   partners$pop_up_content[i] <- collapsed_content
+# }
+
 ```
+
+
 
 ```{r create shapes for use in map}
 #| echo: false
@@ -235,6 +263,65 @@ my_map
 
 # stop rendering (so maps in below chunks won't get included in the html file)
 knitr::knit_exit()
+```
+
+
+# original version of pop-ups
+putting here because it was still over-writing the pop-ups even though I have render false in this code chunk
+
+
+```{r add map pop-up info to data - original}
+#| echo: false
+#| message: false
+#| warning: false
+#| render: false
+
+# determine colors for markers on map based on type
+partners <-  partners %>% 
+  mutate(Type = case_when(is.na(Type) ~ "Other",
+                          TRUE ~ Type),
+          marker_color = case_when(Type == "Farmers Market" ~ "green",
+                                Type == "CSA" ~ "blue",
+                                Type == "Store" ~ "darkred",
+                                Type == "Pop-Up Market" ~ "orange",
+                                TRUE ~ "purple"),
+         icon = case_when(Type == "Farmers Market" ~ "leaf",
+                          Type == "CSA" ~ "home",
+                          Type == "Store" ~ "storefront",
+                          Type == "Pop-Up Market" ~ "car",
+                          TRUE ~ "water"))
+
+# create link for google map directions to each location
+# see here for more info: https://developers.google.com/maps/documentation/urls/get-started
+# this link will open googlemaps with the location as destination and the user's location as starting point
+partners <- partners %>%
+  mutate(google_maps_link = paste("https://www.google.com/maps/dir/?api=1&destination=", 
+                                  gsub(" ", "+", Address), 
+                                  "+", City, "+IL", sep = ""))
+
+# create format of content for pop up markers on each location
+partners$pop_up_content <- paste(sep = "<br/>",
+      # partner name                            
+      paste0("<b>", partners$Name, "</b>"),
+      # partner address
+      if_else(is.na(partners$Address_Line__2), 
+              partners$Address, 
+              paste0(partners$Address, "<br/>", partners$Address_Line__2)),
+      paste0(partners$City, ", ", partners$State, "  ", partners$Zip5),
+      # link to googlemaps directions to partner address from user's current location
+      paste0("<b><a href='", partners$google_maps_link, "'>", "Get Directions", "</a></b>"),
+      # list type of partner 
+      paste0("<br/>", "Type: ", partners$Type, "<br/>"),
+      # info about dates/days/hours of operation
+      paste0("Dates: ", partners$Dates),
+      paste0("Days: ", partners$'Day(s) of the Week'),
+      paste0("Hours: ", partners$Hours),
+      # hyperlink to partner's website if we have one for them
+      if_else(is.na(partners$Link),
+              "",
+              paste0("<b><a href='", partners$Link, "'>", "Website", "</a></b>"))
+      )
+
 ```
 
 
