@@ -1,5 +1,5 @@
 ---
-title: "Link Match Retailers in Illinois"
+title: ""
 author: ""
 output:
   html_document:
